@@ -517,6 +517,19 @@ function redactProxyUrlForLog(value: string): string {
   }
 }
 
+function ensureInheritedActiveManagedProxyState(
+  proxyUrl: string,
+  proxyTls: ManagedProxyTlsOptions | undefined,
+): void {
+  if (getActiveManagedProxyUrl()) {
+    return;
+  }
+  registerActiveManagedProxyUrl(new URL(proxyUrl), {
+    loopbackMode: getActiveManagedProxyLoopbackMode() ?? "gateway-only",
+    proxyTls,
+  });
+}
+
 export function ensureInheritedManagedProxyRoutingActive(): void {
   if (process.env["OPENCLAW_PROXY_ACTIVE"] !== "1") {
     return;
@@ -529,6 +542,7 @@ export function ensureInheritedManagedProxyRoutingActive(): void {
     caFileOverride: process.env["OPENCLAW_PROXY_CA_FILE"],
   });
   const proxyTls = loadManagedProxyTlsOptionsSync(proxyCaFile);
+  ensureInheritedActiveManagedProxyState(proxyUrl, proxyTls);
   bootstrapNodeHttpStack(proxyUrl, proxyTls);
   forceResetGlobalDispatcher();
 }

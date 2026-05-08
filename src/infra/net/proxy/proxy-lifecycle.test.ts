@@ -272,6 +272,9 @@ describe("startProxy", () => {
     process.env["OPENCLAW_PROXY_ACTIVE"] = "1";
     process.env["GLOBAL_AGENT_HTTP_PROXY"] = "https://proxy.example:8443";
     process.env["OPENCLAW_PROXY_CA_FILE"] = caFile;
+    mockForceResetGlobalDispatcher.mockImplementationOnce(() => {
+      expect(getActiveManagedProxyTlsOptions()).toEqual({ ca: "inherited-https-proxy-ca" });
+    });
 
     ensureInheritedManagedProxyRoutingActive();
 
