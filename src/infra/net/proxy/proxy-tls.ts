@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { ProxyConfig } from "../../../config/zod-schema.proxy.js";
 
@@ -32,6 +33,21 @@ export async function loadManagedProxyTlsOptions(
   }
   try {
     return { ca: await readFile(caFile, "utf8") };
+  } catch (err) {
+    throw new Error(`proxy CA file could not be read (${caFile}): ${formatReadError(err)}`, {
+      cause: err,
+    });
+  }
+}
+
+export function loadManagedProxyTlsOptionsSync(
+  caFile: string | undefined,
+): ManagedProxyTlsOptions | undefined {
+  if (!caFile) {
+    return undefined;
+  }
+  try {
+    return { ca: readFileSync(caFile, "utf8") };
   } catch (err) {
     throw new Error(`proxy CA file could not be read (${caFile}): ${formatReadError(err)}`, {
       cause: err,

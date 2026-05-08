@@ -28,6 +28,7 @@ import {
 } from "./active-proxy-state.js";
 import {
   loadManagedProxyTlsOptions,
+  loadManagedProxyTlsOptionsSync,
   resolveManagedProxyCaFile,
   type ManagedProxyTlsOptions,
 } from "./proxy-tls.js";
@@ -49,7 +50,11 @@ const PROXY_ENV_KEYS = ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"
 const GLOBAL_AGENT_PROXY_KEYS = ["GLOBAL_AGENT_HTTP_PROXY", "GLOBAL_AGENT_HTTPS_PROXY"] as const;
 const GLOBAL_AGENT_FORCE_KEYS = ["GLOBAL_AGENT_FORCE_GLOBAL_AGENT"] as const;
 const NO_PROXY_ENV_KEYS = ["no_proxy", "NO_PROXY", "GLOBAL_AGENT_NO_PROXY"] as const;
-const PROXY_ACTIVE_KEYS = ["OPENCLAW_PROXY_ACTIVE", "OPENCLAW_PROXY_LOOPBACK_MODE"] as const;
+const PROXY_ACTIVE_KEYS = [
+  "OPENCLAW_PROXY_ACTIVE",
+  "OPENCLAW_PROXY_LOOPBACK_MODE",
+  "OPENCLAW_PROXY_CA_FILE",
+] as const;
 const ALL_PROXY_ENV_KEYS = [
   ...PROXY_ENV_KEYS,
   ...GLOBAL_AGENT_PROXY_KEYS,
@@ -120,16 +125,25 @@ function captureProxyEnv(): ProxyEnvSnapshot {
     GLOBAL_AGENT_NO_PROXY: process.env["GLOBAL_AGENT_NO_PROXY"],
     OPENCLAW_PROXY_ACTIVE: process.env["OPENCLAW_PROXY_ACTIVE"],
     OPENCLAW_PROXY_LOOPBACK_MODE: process.env["OPENCLAW_PROXY_LOOPBACK_MODE"],
+    OPENCLAW_PROXY_CA_FILE: process.env["OPENCLAW_PROXY_CA_FILE"],
   };
 }
 
-function injectProxyEnv(proxyUrl: string, loopbackMode: ProxyLoopbackMode): ProxyEnvSnapshot {
+function injectProxyEnv(
+  proxyUrl: string,
+  loopbackMode: ProxyLoopbackMode,
+  proxyCaFile: string | undefined,
+): ProxyEnvSnapshot {
   const snapshot = captureProxyEnv();
-  applyProxyEnv(proxyUrl, loopbackMode);
+  applyProxyEnv(proxyUrl, loopbackMode, proxyCaFile);
   return snapshot;
 }
 
-function applyProxyEnv(proxyUrl: string, loopbackMode: ProxyLoopbackMode): void {
+function applyProxyEnv(
+  proxyUrl: string,
+  loopbackMode: ProxyLoopbackMode,
+  proxyCaFile: string | undefined,
+): void {
   for (const key of PROXY_ENV_KEYS) {
     process.env[key] = proxyUrl;
   }
@@ -139,6 +153,11 @@ function applyProxyEnv(proxyUrl: string, loopbackMode: ProxyLoopbackMode): void 
   process.env["GLOBAL_AGENT_FORCE_GLOBAL_AGENT"] = "true";
   process.env["OPENCLAW_PROXY_ACTIVE"] = "1";
   process.env["OPENCLAW_PROXY_LOOPBACK_MODE"] = loopbackMode;
+  if (proxyCaFile) {
+    process.env["OPENCLAW_PROXY_CA_FILE"] = proxyCaFile;
+  } else {
+    delete process.env["OPENCLAW_PROXY_CA_FILE"];
+  }
   for (const key of NO_PROXY_ENV_KEYS) {
     process.env[key] = "";
   }
@@ -506,7 +525,11 @@ export function ensureInheritedManagedProxyRoutingActive(): void {
   if (!proxyUrl || !isSupportedProxyUrl(proxyUrl)) {
     return;
   }
-  bootstrapNodeHttpStack(proxyUrl, undefined);
+  const proxyCaFile = resolveManagedProxyCaFile({
+    caFileOverride: process.env["OPENCLAW_PROXY_CA_FILE"],
+  });
+  const proxyTls = loadManagedProxyTlsOptionsSync(proxyCaFile);
+  bootstrapNodeHttpStack(proxyUrl, proxyTls);
   forceResetGlobalDispatcher();
 }
 
@@ -517,7 +540,8 @@ export async function startProxy(config: ProxyConfig | undefined): Promise<Proxy
 
   const proxyUrl = resolveProxyUrl(config);
   const loopbackMode = config.loopbackMode ?? "gateway-only";
-  const proxyTls = await loadManagedProxyTlsOptions(resolveManagedProxyCaFile({ config }));
+  const proxyCaFile = resolveManagedProxyCaFile({ config });
+  const proxyTls = await loadManagedProxyTlsOptions(proxyCaFile);
   const activeProxyUrl = getActiveManagedProxyUrl();
   if (activeProxyUrl) {
     const registration = registerActiveManagedProxyUrl(new URL(proxyUrl), {
@@ -543,7 +567,7 @@ export async function startProxy(config: ProxyConfig | undefined): Promise<Proxy
   let registration: ActiveManagedProxyRegistration | null = null;
 
   try {
-    injectedEnvSnapshot = injectProxyEnv(proxyUrl, loopbackMode);
+    injectedEnvSnapshot = injectProxyEnv(proxyUrl, loopbackMode, proxyCaFile);
     registration = registerActiveManagedProxyUrl(new URL(proxyUrl), {
       loopbackMode,
       proxyTls,

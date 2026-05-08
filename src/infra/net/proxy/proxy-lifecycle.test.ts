@@ -42,6 +42,7 @@ import { _resetActiveManagedProxyStateForTests } from "./active-proxy-state.js";
 import { getActiveManagedProxyTlsOptions } from "./active-proxy-state.js";
 import {
   _resetGlobalAgentBootstrapForTests,
+  ensureInheritedManagedProxyRoutingActive,
   registerManagedProxyGatewayLoopbackNoProxy,
   startProxy,
   stopProxy,
@@ -69,6 +70,7 @@ describe("startProxy", () => {
     "GLOBAL_AGENT_NO_PROXY",
     "OPENCLAW_PROXY_ACTIVE",
     "OPENCLAW_PROXY_LOOPBACK_MODE",
+    "OPENCLAW_PROXY_CA_FILE",
     "OPENCLAW_PROXY_URL",
   ];
   const originalHttpRequest = http.request;
@@ -247,6 +249,39 @@ describe("startProxy", () => {
     );
 
     await stopProxy(handle);
+  });
+
+  it("exports proxy CA file paths for inherited child routing", async () => {
+    const caFile = writeTempCa("exported-proxy-ca");
+
+    const handle = await startProxy({
+      enabled: true,
+      proxyUrl: "https://proxy.example:8443",
+      tls: { caFile },
+    });
+
+    expect(process.env["OPENCLAW_PROXY_CA_FILE"]).toBe(caFile);
+
+    await stopProxy(handle);
+
+    expect(process.env["OPENCLAW_PROXY_CA_FILE"]).toBeUndefined();
+  });
+
+  it("loads inherited HTTPS proxy CA trust for child routing", () => {
+    const caFile = writeTempCa("inherited-https-proxy-ca");
+    process.env["OPENCLAW_PROXY_ACTIVE"] = "1";
+    process.env["GLOBAL_AGENT_HTTP_PROXY"] = "https://proxy.example:8443";
+    process.env["OPENCLAW_PROXY_CA_FILE"] = caFile;
+
+    ensureInheritedManagedProxyRoutingActive();
+
+    expect(mockBootstrapGlobalAgent).not.toHaveBeenCalled();
+    expect(proxyAgentCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ca: "inherited-https-proxy-ca",
+      }),
+    );
+    expect(mockForceResetGlobalDispatcher).toHaveBeenCalledOnce();
   });
 
   it("registers proxy CA trust before resetting the undici dispatcher", async () => {
